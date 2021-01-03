@@ -1,0 +1,522 @@
+From 9c5aa6caec9ab1b70f2dd3e9318f116d3ebed025 Mon Sep 17 00:00:00 2001
+From: trickerer <onlysuffering@gmail.com>
+Date: Sat, 2 Jan 2021 21:36:27 +0700
+Subject: [PATCH] traumas2020
+
+---
+ src/server/game/Entities/Unit/Unit.cpp             |   5 +
+ src/server/game/Scripting/ScriptMgr.cpp            |   5 +
+ src/server/game/Scripting/ScriptMgr.h              |   4 +
+ src/server/scripts/Custom/custom_script_loader.cpp |   2 +
+ src/server/scripts/Custom/traumas.cpp              | 300 +++++++++++++++++++++
+ src/server/worldserver/worldserver.conf.dist       | 119 ++++++++
+ 6 files changed, 435 insertions(+)
+ create mode 100644 src/server/scripts/Custom/traumas.cpp
+
+diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
+index cced184..fcb048b 100644
+--- a/src/server/game/Entities/Unit/Unit.cpp
++++ b/src/server/game/Entities/Unit/Unit.cpp
+@@ -694,6 +694,11 @@ bool Unit::HasBreakableByDamageCrowdControlAura(Unit* excludeCasterChannel) cons
+     // Hook for OnDamage Event
+     sScriptMgr->OnDamage(attacker, victim, damage);
+ 
++    // Hook for OnDamageEx Event
++    sScriptMgr->OnDamageEx(attacker, victim, damage,
++        cleanDamage && (cleanDamage->hitOutCome == MELEE_HIT_CRIT || cleanDamage->hitOutCome == MELEE_HIT_CRUSHING),
++        damagetype == DIRECT_DAMAGE || damagetype == SPELL_DIRECT_DAMAGE, spellProto ? spellProto->SchoolMask : 0);
++
+     // Signal to pets that their owner was attacked - except when DOT.
+     if (attacker != victim && damagetype != DOT)
+     {
+diff --git a/src/server/game/Scripting/ScriptMgr.cpp b/src/server/game/Scripting/ScriptMgr.cpp
+index 8019735..c1a3cea 100644
+--- a/src/server/game/Scripting/ScriptMgr.cpp
++++ b/src/server/game/Scripting/ScriptMgr.cpp
+@@ -2108,6 +2108,11 @@ void ScriptMgr::OnDamage(Unit* attacker, Unit* victim, uint32& damage)
+     FOREACH_SCRIPT(UnitScript)->OnDamage(attacker, victim, damage);
+ }
+ 
++void ScriptMgr::OnDamageEx(Unit* attacker, Unit* victim, uint32& damage, bool crit, bool direct, uint32 schoolMask)
++{
++    FOREACH_SCRIPT(UnitScript)->OnDamageEx(attacker, victim, damage, crit, direct, schoolMask);
++}
++
+ void ScriptMgr::ModifyPeriodicDamageAurasTick(Unit* target, Unit* attacker, uint32& damage)
+ {
+     FOREACH_SCRIPT(UnitScript)->ModifyPeriodicDamageAurasTick(target, attacker, damage);
+diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
+index 3069fcc..99bc979 100644
+--- a/src/server/game/Scripting/ScriptMgr.h
++++ b/src/server/game/Scripting/ScriptMgr.h
+@@ -404,6 +404,9 @@ class TC_GAME_API UnitScript : public ScriptObject
+         // Called when a unit deals damage to another unit
+         virtual void OnDamage(Unit* /*attacker*/, Unit* /*victim*/, uint32& /*damage*/) { }
+ 
++        // Called when a unit deals damage to another unit (more parameters)
++        virtual void OnDamageEx(Unit* /*attacker*/, Unit* /*victim*/, uint32& /*damage*/, bool /*crit*/, bool /*direct*/, uint32 /*schoolMask*/) { }
++
+         // Called when DoT's Tick Damage is being Dealt
+         virtual void ModifyPeriodicDamageAurasTick(Unit* /*target*/, Unit* /*attacker*/, uint32& /*damage*/) { }
+ 
+@@ -1084,6 +1087,7 @@ class TC_GAME_API ScriptMgr
+ 
+         void OnHeal(Unit* healer, Unit* reciever, uint32& gain);
+         void OnDamage(Unit* attacker, Unit* victim, uint32& damage);
++        void OnDamageEx(Unit* attacker, Unit* victim, uint32& damage, bool crit, bool direct, uint32 schoolMask);
+         void ModifyPeriodicDamageAurasTick(Unit* target, Unit* attacker, uint32& damage);
+         void ModifyMeleeDamage(Unit* target, Unit* attacker, uint32& damage);
+         void ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& damage);
+diff --git a/src/server/scripts/Custom/custom_script_loader.cpp b/src/server/scripts/Custom/custom_script_loader.cpp
+index 1df319b..b7a787e 100644
+--- a/src/server/scripts/Custom/custom_script_loader.cpp
++++ b/src/server/scripts/Custom/custom_script_loader.cpp
+@@ -16,10 +16,12 @@
+  */
+ 
+ // This is where scripts' loading functions should be declared:
++void AddSC_traumas();
+ 
+ 
+ // The name of this function should match:
+ // void Add${NameOfDirectory}Scripts()
+ void AddCustomScripts()
+ {
++    AddSC_traumas();
+ }
+diff --git a/src/server/scripts/Custom/traumas.cpp b/src/server/scripts/Custom/traumas.cpp
+new file mode 100644
+index 0000000..0b55b80
+--- /dev/null
++++ b/src/server/scripts/Custom/traumas.cpp
+@@ -0,0 +1,300 @@
++/*
++ * Copyright (C) 2020-2021 trickerer <https://github.com/trickerer>
++ */
++
++#include "ScriptMgr.h"
++#include "Config.h"
++#include "Log.h"
++#include "SpellAuraEffects.h"
++
++//version
++#define TRAUMAS_REVISION 59
++
++//config
++bool   _Tenabled;
++bool   _TenableDirect;
++bool   _TenablePeriodic;
++bool   _TCritsOnly;
++float  _TchanceMultCreature;
++float  _TchanceMultPlayer;
++float  _TchanceMultCrit;
++bool   _TenableCreatures;
++bool   _TenableRankNormal;
++bool   _TenableRankElite;
++bool   _TenableRankRare;
++bool   _TenableRankRareElite;
++bool   _TenableRankBoss;
++bool   _TenablePlayers;
++bool   _TenablePlayerControlled;
++bool   _TenableInPVP;
++uint32 _ThpPctThreshold;
++bool   _TenableCure;
++float  _TcureChanceMult;
++uint32 _TdurationOverride;
++
++//defs
++enum TraumaTypes : uint8
++{
++    TRAUMA_EYE                          = 1,
++    TRAUMA_LIMB                         = 2,
++    TRAUMA_BODY                         = 3,
++    TRAUMA_HEAD                         = 4,
++    TRAUMA_INTERNAL                     = 5
++};
++
++#define TRAUMA_NONE 0
++#define MAX_TRAUMAS 5
++
++enum TraumaBaseSpells
++{
++    SPELL_TRAUMA_BASE_EYE               = 455001,
++    SPELL_TRAUMA_BASE_LIMB              = 455002,
++    SPELL_TRAUMA_BASE_BODY              = 455003,
++    SPELL_TRAUMA_BASE_HEAD              = 455004,
++    SPELL_TRAUMA_BASE_INTERNAL          = 455005
++};
++static const uint32 SPELL_TRAUMA_BASE[MAX_TRAUMAS] =
++{
++    SPELL_TRAUMA_BASE_EYE,
++    SPELL_TRAUMA_BASE_LIMB,
++    SPELL_TRAUMA_BASE_BODY,
++    SPELL_TRAUMA_BASE_HEAD,
++    SPELL_TRAUMA_BASE_INTERNAL
++};
++
++//traits - no c++11+
++namespace trauma_traits
++{
++template <TraumaTypes, CreatureType> struct Is_viable      { enum { value = true  }; };
++
++#define NOT_VIABLE(t,c) template <>  struct Is_viable<t,c> { enum { value = false }; };
++#define NOT_VIABLE_ALL(c) NOT_VIABLE(TRAUMA_EYE,c) NOT_VIABLE(TRAUMA_LIMB,c) NOT_VIABLE(TRAUMA_BODY,c) NOT_VIABLE(TRAUMA_HEAD,c) NOT_VIABLE(TRAUMA_INTERNAL,c)
++
++/*Giant*/      NOT_VIABLE(TRAUMA_BODY, CREATURE_TYPE_GIANT) NOT_VIABLE(TRAUMA_INTERNAL, CREATURE_TYPE_GIANT)
++/*Undead*/     NOT_VIABLE(TRAUMA_EYE, CREATURE_TYPE_UNDEAD) NOT_VIABLE(TRAUMA_BODY, CREATURE_TYPE_UNDEAD)
++/*Undead*/     NOT_VIABLE(TRAUMA_INTERNAL, CREATURE_TYPE_UNDEAD)
++/*Mechanical*/ NOT_VIABLE(TRAUMA_EYE, CREATURE_TYPE_MECHANICAL) NOT_VIABLE(TRAUMA_BODY, CREATURE_TYPE_MECHANICAL)
++/*NSpecified*/ NOT_VIABLE_ALL(CREATURE_TYPE_NOT_SPECIFIED)
++/*Totem*/      NOT_VIABLE_ALL(CREATURE_TYPE_TOTEM)
++/*Gas Cloud*/  NOT_VIABLE_ALL(CREATURE_TYPE_GAS_CLOUD)
++}
++template <TraumaTypes T, CreatureType C, bool is_viable = trauma_traits::Is_viable<T,C>::value>
++struct Trauma { static bool IsViable() { return is_viable; } };
++
++struct TraumaViability
++{
++    explicit TraumaViability(TraumaTypes t, CreatureType c, bool val) : t_type(t), c_type(c), my_val(val) { }
++
++    TraumaTypes ttype() const { return t_type; }
++    CreatureType ctype() const { return c_type; }
++    bool viable() const { return my_val; }
++
++private:
++    TraumaTypes t_type;
++    CreatureType c_type;
++    bool my_val;
++};
++
++typedef std::multimap<CreatureType, const TraumaViability> TraumaViabilityMap;
++typedef std::pair<TraumaViabilityMap::const_iterator, TraumaViabilityMap::const_iterator> TraumaViabilityRange;
++typedef TraumaViabilityMap::value_type TraumaViabilityPair;
++
++#define Tpair(t,c) TraumaViabilityPair(c,TraumaViability(t,c, Trauma<t,c>::IsViable()))
++#define Tpairs(t) Tpair(t,CREATURE_TYPE_BEAST), Tpair(t,CREATURE_TYPE_DRAGONKIN), Tpair(t,CREATURE_TYPE_DEMON), Tpair(t,CREATURE_TYPE_ELEMENTAL), Tpair(t,CREATURE_TYPE_GIANT), Tpair(t,CREATURE_TYPE_UNDEAD), Tpair(t,CREATURE_TYPE_HUMANOID), Tpair(t,CREATURE_TYPE_CRITTER), Tpair(t,CREATURE_TYPE_MECHANICAL), Tpair(t,CREATURE_TYPE_NOT_SPECIFIED), Tpair(t,CREATURE_TYPE_TOTEM), Tpair(t,CREATURE_TYPE_NON_COMBAT_PET), Tpair(t,CREATURE_TYPE_GAS_CLOUD)
++
++static const TraumaViabilityPair tviaarr[] =
++{ Tpairs(TRAUMA_EYE), Tpairs(TRAUMA_LIMB), Tpairs(TRAUMA_BODY), Tpairs(TRAUMA_HEAD), Tpairs(TRAUMA_INTERNAL) };
++
++static const TraumaViabilityMap TraumasMap(tviaarr, tviaarr + sizeof(tviaarr) / sizeof(tviaarr[0]));
++
++//scripts
++class traumas_config : public WorldScript
++{
++public:
++    traumas_config() : WorldScript("traumas_config") { }
++
++    void OnConfigLoad(bool reload) override
++    {
++        _InitTraumasSystem(reload);
++    }
++
++private:
++    void _InitTraumasSystem(bool reload)
++    {
++        if (!reload)
++            TC_LOG_INFO("server.loading", "Loading Traumas system...");
++
++        _LoadConfig();
++
++        TC_LOG_INFO("server.loading", ">> Traumas config %s.", reload ? "re-loaded" : "loaded");
++
++        if (_Tenabled)
++            TC_LOG_INFO("server.loading", ">> Traumas system enabled (rev %u)", (uint32)TRAUMAS_REVISION);
++    }
++
++    void _LoadConfig()
++    {
++        _Tenabled                = sConfigMgr->GetBoolDefault("Trauma.Enable", true);
++
++        _TenableDirect           = sConfigMgr->GetBoolDefault("Trauma.Damage.Direct", true);
++        _TenablePeriodic         = sConfigMgr->GetBoolDefault("Trauma.Damage.Periodic", true);
++
++        _TenableCreatures        = sConfigMgr->GetBoolDefault("Trauma.Target.Creature", true);
++        _TenableRankNormal       = sConfigMgr->GetBoolDefault("Trauma.Target.Creature.Rank.Normal", true);
++        _TenableRankElite        = sConfigMgr->GetBoolDefault("Trauma.Target.Creature.Rank.Elite", true);
++        _TenableRankRare         = sConfigMgr->GetBoolDefault("Trauma.Target.Creature.Rank.Rare", true);
++        _TenableRankRareElite    = sConfigMgr->GetBoolDefault("Trauma.Target.Creature.Rank.RareElite", true);
++        _TenableRankBoss         = sConfigMgr->GetBoolDefault("Trauma.Target.Creature.Rank.Boss", false);
++
++        _TenablePlayers          = sConfigMgr->GetBoolDefault("Trauma.Target.Player", true);
++        _TenablePlayerControlled = sConfigMgr->GetBoolDefault("Trauma.Target.Player.Minions", true);
++        _TenableInPVP            = sConfigMgr->GetBoolDefault("Trauma.Target.Player.PVP", false);
++
++        _ThpPctThreshold         = sConfigMgr->GetIntDefault("Trauma.HealthPctThreshold", 0);
++        _TCritsOnly              = sConfigMgr->GetBoolDefault("Trauma.CritsOnly", true);
++        _TchanceMultCreature     = sConfigMgr->GetFloatDefault("Trauma.ChanceMultiplier.Creature", 1.0f);
++        _TchanceMultPlayer       = sConfigMgr->GetFloatDefault("Trauma.ChanceMultiplier.Player", 1.0f);
++        _TchanceMultCrit         = sConfigMgr->GetFloatDefault("Trauma.ChanceMultiplier.Crit", 1.0f);
++
++        _TenableCure             = sConfigMgr->GetBoolDefault("Trauma.Cure.Enable", true);
++        _TcureChanceMult         = sConfigMgr->GetFloatDefault("Trauma.Cure.ChanceMultiplier", 1.0f);
++
++        _TdurationOverride       = sConfigMgr->GetIntDefault("Trauma.DurationOverride", 0);
++    }
++};
++
++class script_traumas : public UnitScript
++{
++public:
++    script_traumas() : UnitScript("script_traumas") { }
++
++    void OnHeal(Unit* /*healer*/, Unit* reciever, uint32& gain) override
++    {
++        if (!_Tenabled)
++            return;
++
++        if (!_TenableCure)
++            return;
++
++        float chance = reciever->IsFullHealth() ? 100.0f :
++            (reciever->GetHealth() + gain >= reciever->GetMaxHealth()) ? 50.f : (gain * 100.f) / reciever->GetMaxHealth();
++        chance *= _TcureChanceMult;
++
++        if (!roll_chance_f(chance))
++            return;
++
++        //1 - eye
++        if (reciever->HasAuraType(SPELL_AURA_MOD_CRIT_PCT))
++            reciever->RemoveAurasDueToSpell(SPELL_TRAUMA_BASE_EYE);
++        //2 - limb
++        else if (reciever->HasAuraType(SPELL_AURA_MOD_MELEE_RANGED_HASTE))
++            reciever->RemoveAurasDueToSpell(SPELL_TRAUMA_BASE_LIMB);
++        //3 - body
++        else if (reciever->HasAuraType(SPELL_AURA_MOD_INCREASE_HEALTH_PERCENT))
++            reciever->RemoveAurasDueToSpell(SPELL_TRAUMA_BASE_BODY);
++        //4 - head
++        else if (reciever->HasAuraType(SPELL_AURA_MOD_SPEED_SLOW_ALL))
++            reciever->RemoveAurasDueToSpell(SPELL_TRAUMA_BASE_HEAD);
++        //5 - innards
++        else if (reciever->HasAuraType(SPELL_AURA_MOD_DAMAGE_PERCENT_TAKEN))
++            reciever->RemoveAurasDueToSpell(SPELL_TRAUMA_BASE_INTERNAL);
++    }
++
++    void OnDamageEx(Unit* attacker, Unit* victim, uint32& damage, bool crit, bool direct, uint32 /*schoolMask*/) override
++    {               /*may be NULL*/
++        if (!_Tenabled)
++            return;
++
++        if (!attacker || !damage || !victim->IsAlive() || damage >= victim->GetHealth())
++            return;
++
++        if (direct ? !_TenableDirect : !_TenablePeriodic)
++            return;
++        if (_ThpPctThreshold && (victim->GetHealth() - damage) / victim->GetMaxHealth() > _ThpPctThreshold)
++            return;
++        if (victim->IsControlledByPlayer())
++        {
++            bool vplayer = victim->GetTypeId() == TYPEID_PLAYER;
++            bool aplayer = attacker && attacker->GetTypeId() == TYPEID_PLAYER;
++
++            if (!_TenablePlayers && vplayer)
++                return;
++            if (!_TenablePlayerControlled && !vplayer)
++                return;
++            if (!_TenableInPVP && vplayer && aplayer)
++                return;
++        }
++        else// if (victim->GetTypeId() == TYPEID_UNIT)
++        {
++            if (!_TenableCreatures)
++                return;
++
++            uint32 rank = victim->ToCreature()->GetCreatureTemplate()->rank;
++            if (!_TenableRankNormal && rank == CREATURE_ELITE_NORMAL)
++                return;
++            if (!_TenableRankElite && rank == CREATURE_ELITE_ELITE)
++                return;
++            if (!_TenableRankRare && rank == CREATURE_ELITE_RARE)
++                return;
++            if (!_TenableRankRareElite && rank == CREATURE_ELITE_RAREELITE)
++                return;
++            if (!_TenableRankBoss && rank == CREATURE_ELITE_WORLDBOSS)
++                return;
++        }
++        if (_TCritsOnly && !crit)
++            return;
++
++        //chance is (2x hp pct damage dealt)
++        float chance = (damage * 200.f) / victim->GetMaxHealth();
++        chance *= victim->IsControlledByPlayer() ? _TchanceMultPlayer : _TchanceMultCreature;
++        if (crit)
++            chance *= _TchanceMultCrit;
++
++        if (!roll_chance_f(chance))
++            return;
++
++        uint8 traumaType = _GetViableTraumaType(victim);
++        if (traumaType == TRAUMA_NONE)
++        {
++            //TC_LOG_ERROR("scripts", "No viable trauma type for cre type %u", victim->GetCreatureType());
++            return;
++        }
++
++        uint32 traumaSpellId = SPELL_TRAUMA_BASE[traumaType - 1];
++
++        CastSpellExtraArgs args(true);
++        args.SetOriginalCaster(attacker->GetGUID());
++        victim->CastSpell(victim, traumaSpellId, args);
++
++        if (_TdurationOverride)
++        {
++            if (Aura* trauma = victim->GetAura(traumaSpellId, attacker->GetGUID()))
++            {
++                trauma->SetDuration(int32(_TdurationOverride));
++                trauma->SetMaxDuration(int32(_TdurationOverride));
++            }
++        }
++    }
++
++private:
++    uint8 _GetViableTraumaType(Unit const* unit) const
++    {
++        std::vector<uint8> vt_types;
++
++        TraumaViabilityRange v_range = TraumasMap.equal_range(CreatureType(unit->GetCreatureType()));
++        for (TraumaViabilityMap::const_iterator it = v_range.first; it != v_range.second; ++it)
++            if (it->second.viable())
++                vt_types.push_back(it->second.ttype());
++
++        if (!vt_types.empty())
++            return vt_types.size() == 1 ? vt_types.front() : Trinity::Containers::SelectRandomContainerElement(vt_types);
++
++        return uint8(TRAUMA_NONE);
++    }
++};
++
++void AddSC_traumas()
++{
++    new traumas_config();
++    new script_traumas();
++}
+diff --git a/src/server/worldserver/worldserver.conf.dist b/src/server/worldserver/worldserver.conf.dist
+index b364635..a2de24a 100644
+--- a/src/server/worldserver/worldserver.conf.dist
++++ b/src/server/worldserver/worldserver.conf.dist
+@@ -4084,3 +4084,122 @@ Metric.OverallStatusInterval = 1
+ 
+ #
+ ###################################################################################################
++
++###################################################################################################
++# TRAUMAS CONFIGURATION
++#
++#    Trauma.Enable
++#        Description: Enables Traumas.
++#        Default:     1 - (Enable)
++#                     0 - (Disable)
++
++Trauma.Enable = 1
++
++#    Trauma.Damage.Direct
++#    Trauma.Damage.Periodic
++#        Description: Damage types that can cause trauma.
++#        Default:     1 - (Trauma.Damage.Direct)
++#                     1 - (Trauma.Damage.Periodic)
++
++Trauma.Damage.Direct   = 1
++Trauma.Damage.Periodic = 1
++
++#    Trauma.Target.Creature
++#        Description: Can creatures (mobs) be affected by traumas.
++#        Default:     1 - (Enabled)
++#                     0 - (Disabled)
++
++Trauma.Target.Creature = 1
++
++#    Trauma.Target.Creature.Rank.Normal
++#    Trauma.Target.Creature.Rank.Elite
++#    Trauma.Target.Creature.Rank.Rare
++#    Trauma.Target.Creature.Rank.RareElite
++#    Trauma.Target.Creature.Rank.Boss
++#        Description: Filter creatures affected by traumas by rank.
++#        Default:     1 - (Trauma.Target.Creature.Rank.Normal)
++#                     1 - (Trauma.Target.Creature.Rank.Elite)
++#                     1 - (Trauma.Target.Creature.Rank.Rare)
++#                     1 - (Trauma.Target.Creature.Rank.RareElite)
++#                     0 - (Trauma.Target.Creature.Rank.Boss)
++
++Trauma.Target.Creature.Rank.Normal    = 1
++Trauma.Target.Creature.Rank.Elite     = 1
++Trauma.Target.Creature.Rank.Rare      = 1
++Trauma.Target.Creature.Rank.RareElite = 1
++Trauma.Target.Creature.Rank.Boss      = 0
++
++#    Trauma.Target.Player
++#        Description: Can players be affected by traumas.
++#        Default:     1 - (Enabled)
++#                     0 - (Disabled)
++
++Trauma.Target.Player = 1
++
++#    Trauma.Target.Player.Minions
++#        Description: Can player-controlled units (pets, etc.) be affected by traumas.
++#        Default:     1 - (Enabled)
++#                     0 - (Disabled)
++
++Trauma.Target.Player.Minions = 1
++
++#    Trauma.Target.Player.PVP
++#        Description: Enable traumas in PvP.
++#        Default:     0 - (Disabled)
++#                     1 - (Enabled)
++
++Trauma.Target.Player.PVP = 0
++
++#    Trauma.HealthPctThreshold
++#        Description: Make traumas only trigger on units with health percentage below this number.
++#        Default:     0  - (Disabled)
++#                     80 - (Enabled, only trigger on unit with 80% HP or less)
++
++Trauma.HealthPctThreshold = 0
++
++#    Trauma.CritsOnly
++#        Description: Allow traumas to only trigger on critical hits.
++#        Default:     0 - (Disabled)
++#                     1 - (Enabled)
++
++Trauma.CritsOnly = 0
++
++#    Trauma.ChanceMultiplier.Creature
++#    Trauma.ChanceMultiplier.Player
++#        Description: A multiplier of a chance to cause trauma on mobs / players and their minions.
++#        Default:     1.0
++#                     2.0 - (2x chance)
++
++Trauma.ChanceMultiplier.Creature = 1.0
++Trauma.ChanceMultiplier.Player   = 1.0
++
++#    Trauma.ChanceMultiplier.Crit
++#        Description: A multiplier of a chance to cause trauma on critical hit.
++#        Default:     1.0
++#                     2.0 - (2x chance)
++
++Trauma.ChanceMultiplier.Crit = 1.0
++
++#    Trauma.Cure.Enable
++#        Description: Give healing spells a chance to cure trauma (one at a time).
++#        Default:     1 - (Enabled)
++#                     0 - (Disabled)
++
++Trauma.Cure.Enable = 1
++
++#    Trauma.Cure.ChanceMultiplier
++#        Description: A multiplier of a chance to cure trauma by healing.
++#        Default:     1.0
++#                     2.0 - (2x chance)
++
++Trauma.Cure.ChanceMultiplier = 1.0
++
++#    Trauma.DurationOverride
++#        Description: Override duration of trauma (base effect), in milliseconds.
++#        Default:     0      - (Disabled)
++#                     120000 - (Enabled, 2 minutes)
++
++Trauma.DurationOverride = 0
++
++#
++###################################################################################################
+-- 
+2.10.0.windows.1
+
