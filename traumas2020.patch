@@ -1,6 +1,6 @@
-From 9c5aa6caec9ab1b70f2dd3e9318f116d3ebed025 Mon Sep 17 00:00:00 2001
+From 368de2b69a44a4ca396a188b0e64dcb70378fdd7 Mon Sep 17 00:00:00 2001
 From: trickerer <onlysuffering@gmail.com>
-Date: Sat, 2 Jan 2021 21:36:27 +0700
+Date: Tue, 2 Feb 2021 21:35:12 +0700
 Subject: [PATCH] traumas2020
 
 ---
@@ -8,13 +8,13 @@ Subject: [PATCH] traumas2020
  src/server/game/Scripting/ScriptMgr.cpp            |   5 +
  src/server/game/Scripting/ScriptMgr.h              |   4 +
  src/server/scripts/Custom/custom_script_loader.cpp |   2 +
- src/server/scripts/Custom/traumas.cpp              | 300 +++++++++++++++++++++
- src/server/worldserver/worldserver.conf.dist       | 119 ++++++++
- 6 files changed, 435 insertions(+)
+ src/server/scripts/Custom/traumas.cpp              | 314 +++++++++++++++++++++
+ src/server/worldserver/worldserver.conf.dist       | 126 +++++++++
+ 6 files changed, 456 insertions(+)
  create mode 100644 src/server/scripts/Custom/traumas.cpp
 
 diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
-index cced184..fcb048b 100644
+index 0d5ff0e..6de679c 100644
 --- a/src/server/game/Entities/Unit/Unit.cpp
 +++ b/src/server/game/Entities/Unit/Unit.cpp
 @@ -694,6 +694,11 @@ bool Unit::HasBreakableByDamageCrowdControlAura(Unit* excludeCasterChannel) cons
@@ -46,10 +46,10 @@ index 8019735..c1a3cea 100644
  {
      FOREACH_SCRIPT(UnitScript)->ModifyPeriodicDamageAurasTick(target, attacker, damage);
 diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
-index 3069fcc..99bc979 100644
+index 3485c3a..abf718e 100644
 --- a/src/server/game/Scripting/ScriptMgr.h
 +++ b/src/server/game/Scripting/ScriptMgr.h
-@@ -404,6 +404,9 @@ class TC_GAME_API UnitScript : public ScriptObject
+@@ -403,6 +403,9 @@ class TC_GAME_API UnitScript : public ScriptObject
          // Called when a unit deals damage to another unit
          virtual void OnDamage(Unit* /*attacker*/, Unit* /*victim*/, uint32& /*damage*/) { }
  
@@ -59,7 +59,7 @@ index 3069fcc..99bc979 100644
          // Called when DoT's Tick Damage is being Dealt
          virtual void ModifyPeriodicDamageAurasTick(Unit* /*target*/, Unit* /*attacker*/, uint32& /*damage*/) { }
  
-@@ -1084,6 +1087,7 @@ class TC_GAME_API ScriptMgr
+@@ -1083,6 +1086,7 @@ class TC_GAME_API ScriptMgr
  
          void OnHeal(Unit* healer, Unit* reciever, uint32& gain);
          void OnDamage(Unit* attacker, Unit* victim, uint32& damage);
@@ -68,15 +68,14 @@ index 3069fcc..99bc979 100644
          void ModifyMeleeDamage(Unit* target, Unit* attacker, uint32& damage);
          void ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& damage);
 diff --git a/src/server/scripts/Custom/custom_script_loader.cpp b/src/server/scripts/Custom/custom_script_loader.cpp
-index 1df319b..b7a787e 100644
+index 9e5e9ba..3a2fbb4 100644
 --- a/src/server/scripts/Custom/custom_script_loader.cpp
 +++ b/src/server/scripts/Custom/custom_script_loader.cpp
-@@ -16,10 +16,12 @@
+@@ -16,9 +16,11 @@
   */
  
  // This is where scripts' loading functions should be declared:
 +void AddSC_traumas();
- 
  
  // The name of this function should match:
  // void Add${NameOfDirectory}Scripts()
@@ -86,10 +85,10 @@ index 1df319b..b7a787e 100644
  }
 diff --git a/src/server/scripts/Custom/traumas.cpp b/src/server/scripts/Custom/traumas.cpp
 new file mode 100644
-index 0000000..0b55b80
+index 0000000..9fe4635
 --- /dev/null
 +++ b/src/server/scripts/Custom/traumas.cpp
-@@ -0,0 +1,300 @@
+@@ -0,0 +1,314 @@
 +/*
 + * Copyright (C) 2020-2021 trickerer <https://github.com/trickerer>
 + */
@@ -100,7 +99,7 @@ index 0000000..0b55b80
 +#include "SpellAuraEffects.h"
 +
 +//version
-+#define TRAUMAS_REVISION 59
++#define TRAUMAS_REVISION 62
 +
 +//config
 +bool   _Tenabled;
@@ -120,6 +119,7 @@ index 0000000..0b55b80
 +bool   _TenablePlayerControlled;
 +bool   _TenableInPVP;
 +uint32 _ThpPctThreshold;
++float _TtriggerHpPctThreshold;
 +bool   _TenableCure;
 +float  _TcureChanceMult;
 +uint32 _TdurationOverride;
@@ -145,6 +145,7 @@ index 0000000..0b55b80
 +    SPELL_TRAUMA_BASE_HEAD              = 455004,
 +    SPELL_TRAUMA_BASE_INTERNAL          = 455005
 +};
++
 +static const uint32 SPELL_TRAUMA_BASE[MAX_TRAUMAS] =
 +{
 +    SPELL_TRAUMA_BASE_EYE,
@@ -243,6 +244,7 @@ index 0000000..0b55b80
 +        _TenableInPVP            = sConfigMgr->GetBoolDefault("Trauma.Target.Player.PVP", false);
 +
 +        _ThpPctThreshold         = sConfigMgr->GetIntDefault("Trauma.HealthPctThreshold", 0);
++        _TtriggerHpPctThreshold  = sConfigMgr->GetFloatDefault("Trauma.TriggerHealthPctThreshold", 0.0f);
 +        _TCritsOnly              = sConfigMgr->GetBoolDefault("Trauma.CritsOnly", true);
 +        _TchanceMultCreature     = sConfigMgr->GetFloatDefault("Trauma.ChanceMultiplier.Creature", 1.0f);
 +        _TchanceMultPlayer       = sConfigMgr->GetFloatDefault("Trauma.ChanceMultiplier.Player", 1.0f);
@@ -304,16 +306,19 @@ index 0000000..0b55b80
 +            return;
 +        if (_ThpPctThreshold && (victim->GetHealth() - damage) / victim->GetMaxHealth() > _ThpPctThreshold)
 +            return;
++        if (_TtriggerHpPctThreshold > 0.0f && victim->GetMaxHealth() &&
++            damage < CalculatePct(float(victim->GetMaxHealth()), _TtriggerHpPctThreshold))
++            return;
 +        if (victim->IsControlledByPlayer())
 +        {
-+            bool vplayer = victim->GetTypeId() == TYPEID_PLAYER;
-+            bool aplayer = attacker && attacker->GetTypeId() == TYPEID_PLAYER;
-+
-+            if (!_TenablePlayers && vplayer)
++            if (victim->GetTypeId() == TYPEID_PLAYER)
++            {
++                if (!_TenablePlayers)
++                    return;
++            }
++            else if (!_TenablePlayerControlled)
 +                return;
-+            if (!_TenablePlayerControlled && !vplayer)
-+                return;
-+            if (!_TenableInPVP && vplayer && aplayer)
++            if (!_TenableInPVP && attacker && attacker->IsControlledByPlayer())
 +                return;
 +        }
 +        else// if (victim->GetTypeId() == TYPEID_UNIT)
@@ -341,6 +346,14 @@ index 0000000..0b55b80
 +        chance *= victim->IsControlledByPlayer() ? _TchanceMultPlayer : _TchanceMultCreature;
 +        if (crit)
 +            chance *= _TchanceMultCrit;
++
++        uint32 defense = victim->GetDefenseSkillValue();
++        if (defense > victim->GetMaxSkillValueForLevel())
++        {
++            static const float defenseBonusCap = 140.f;
++            AddPct(chance, ((defense - victim->GetMaxSkillValueForLevel()) * -100.f) / defenseBonusCap);
++            chance = std::max<float>(chance, 0.0f);
++        }
 +
 +        if (!roll_chance_f(chance))
 +            return;
@@ -391,10 +404,10 @@ index 0000000..0b55b80
 +    new script_traumas();
 +}
 diff --git a/src/server/worldserver/worldserver.conf.dist b/src/server/worldserver/worldserver.conf.dist
-index b364635..a2de24a 100644
+index 6a51d91..b01168b 100644
 --- a/src/server/worldserver/worldserver.conf.dist
 +++ b/src/server/worldserver/worldserver.conf.dist
-@@ -4084,3 +4084,122 @@ Metric.OverallStatusInterval = 1
+@@ -4089,3 +4089,129 @@ Metric.OverallStatusInterval = 1
  
  #
  ###################################################################################################
@@ -470,6 +483,13 @@ index b364635..a2de24a 100644
 +#                     80 - (Enabled, only trigger on unit with 80% HP or less)
 +
 +Trauma.HealthPctThreshold = 0
++
++#    Trauma.TriggerHealthPctThreshold
++#        Description: Make traumas only trigger if damage >= amount of target max hp percentage.
++#        Default:     0 - (Disabled)
++#                     3 - (Enabled, only trigger if damage >= 3% of target's maximum hp)
++
++Trauma.TriggerHealthPctThreshold = 0
 +
 +#    Trauma.CritsOnly
 +#        Description: Allow traumas to only trigger on critical hits.
