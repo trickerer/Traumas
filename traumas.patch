@@ -1,20 +1,20 @@
-From 368de2b69a44a4ca396a188b0e64dcb70378fdd7 Mon Sep 17 00:00:00 2001
+From 5656b9d19ebae5d1cf6c82511dab0301a8a29de6 Mon Sep 17 00:00:00 2001
 From: trickerer <onlysuffering@gmail.com>
-Date: Tue, 2 Feb 2021 21:35:12 +0700
-Subject: [PATCH] traumas2020
+Date: Fri, 19 Feb 2021 19:21:09 +0700
+Subject: [PATCH] traumas
 
 ---
- src/server/game/Entities/Unit/Unit.cpp             |   5 +
- src/server/game/Scripting/ScriptMgr.cpp            |   5 +
- src/server/game/Scripting/ScriptMgr.h              |   4 +
- src/server/scripts/Custom/custom_script_loader.cpp |   2 +
- src/server/scripts/Custom/traumas.cpp              | 314 +++++++++++++++++++++
- src/server/worldserver/worldserver.conf.dist       | 126 +++++++++
- 6 files changed, 456 insertions(+)
+ src/server/game/Entities/Unit/Unit.cpp        |   5 +
+ src/server/game/Scripting/ScriptMgr.cpp       |   5 +
+ src/server/game/Scripting/ScriptMgr.h         |   4 +
+ .../scripts/Custom/custom_script_loader.cpp   |   2 +
+ src/server/scripts/Custom/traumas.cpp         | 300 ++++++++++++++++++
+ src/server/worldserver/worldserver.conf.dist  | 126 ++++++++
+ 6 files changed, 442 insertions(+)
  create mode 100644 src/server/scripts/Custom/traumas.cpp
 
 diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
-index 0d5ff0e..6de679c 100644
+index b2fa0d6..97a09e2 100644
 --- a/src/server/game/Entities/Unit/Unit.cpp
 +++ b/src/server/game/Entities/Unit/Unit.cpp
 @@ -694,6 +694,11 @@ bool Unit::HasBreakableByDamageCrowdControlAura(Unit* excludeCasterChannel) cons
@@ -85,10 +85,10 @@ index 9e5e9ba..3a2fbb4 100644
  }
 diff --git a/src/server/scripts/Custom/traumas.cpp b/src/server/scripts/Custom/traumas.cpp
 new file mode 100644
-index 0000000..9fe4635
+index 0000000..bf2761f
 --- /dev/null
 +++ b/src/server/scripts/Custom/traumas.cpp
-@@ -0,0 +1,314 @@
+@@ -0,0 +1,300 @@
 +/*
 + * Copyright (C) 2020-2021 trickerer <https://github.com/trickerer>
 + */
@@ -99,7 +99,7 @@ index 0000000..9fe4635
 +#include "SpellAuraEffects.h"
 +
 +//version
-+#define TRAUMAS_REVISION 62
++static constexpr uint32 TRAUMAS_REVISION = 64;
 +
 +//config
 +bool   _Tenabled;
@@ -134,8 +134,8 @@ index 0000000..9fe4635
 +    TRAUMA_INTERNAL                     = 5
 +};
 +
-+#define TRAUMA_NONE 0
-+#define MAX_TRAUMAS 5
++static constexpr uint32 TRAUMA_NONE = 0;
++static constexpr uint32 MAX_TRAUMAS = 5;
 +
 +enum TraumaBaseSpells
 +{
@@ -146,7 +146,7 @@ index 0000000..9fe4635
 +    SPELL_TRAUMA_BASE_INTERNAL          = 455005
 +};
 +
-+static const uint32 SPELL_TRAUMA_BASE[MAX_TRAUMAS] =
++static constexpr uint32 SPELL_TRAUMA_BASE[MAX_TRAUMAS] =
 +{
 +    SPELL_TRAUMA_BASE_EYE,
 +    SPELL_TRAUMA_BASE_LIMB,
@@ -155,7 +155,6 @@ index 0000000..9fe4635
 +    SPELL_TRAUMA_BASE_INTERNAL
 +};
 +
-+//traits - no c++11+
 +namespace trauma_traits
 +{
 +template <TraumaTypes, CreatureType> struct Is_viable      { enum { value = true  }; };
@@ -171,34 +170,21 @@ index 0000000..9fe4635
 +/*Totem*/      NOT_VIABLE_ALL(CREATURE_TYPE_TOTEM)
 +/*Gas Cloud*/  NOT_VIABLE_ALL(CREATURE_TYPE_GAS_CLOUD)
 +}
-+template <TraumaTypes T, CreatureType C, bool is_viable = trauma_traits::Is_viable<T,C>::value>
-+struct Trauma { static bool IsViable() { return is_viable; } };
 +
 +struct TraumaViability
 +{
-+    explicit TraumaViability(TraumaTypes t, CreatureType c, bool val) : t_type(t), c_type(c), my_val(val) { }
-+
-+    TraumaTypes ttype() const { return t_type; }
-+    CreatureType ctype() const { return c_type; }
-+    bool viable() const { return my_val; }
-+
-+private:
-+    TraumaTypes t_type;
-+    CreatureType c_type;
-+    bool my_val;
++    const TraumaTypes t_type;
++    const bool viable;
 +};
 +
-+typedef std::multimap<CreatureType, const TraumaViability> TraumaViabilityMap;
++typedef std::multimap<const CreatureType, const TraumaViability> TraumaViabilityMap;
 +typedef std::pair<TraumaViabilityMap::const_iterator, TraumaViabilityMap::const_iterator> TraumaViabilityRange;
 +typedef TraumaViabilityMap::value_type TraumaViabilityPair;
 +
-+#define Tpair(t,c) TraumaViabilityPair(c,TraumaViability(t,c, Trauma<t,c>::IsViable()))
++#define Tpair(t,c) TraumaViabilityPair(c, TraumaViability{t, trauma_traits::Is_viable<t, c>::value})
 +#define Tpairs(t) Tpair(t,CREATURE_TYPE_BEAST), Tpair(t,CREATURE_TYPE_DRAGONKIN), Tpair(t,CREATURE_TYPE_DEMON), Tpair(t,CREATURE_TYPE_ELEMENTAL), Tpair(t,CREATURE_TYPE_GIANT), Tpair(t,CREATURE_TYPE_UNDEAD), Tpair(t,CREATURE_TYPE_HUMANOID), Tpair(t,CREATURE_TYPE_CRITTER), Tpair(t,CREATURE_TYPE_MECHANICAL), Tpair(t,CREATURE_TYPE_NOT_SPECIFIED), Tpair(t,CREATURE_TYPE_TOTEM), Tpair(t,CREATURE_TYPE_NON_COMBAT_PET), Tpair(t,CREATURE_TYPE_GAS_CLOUD)
 +
-+static const TraumaViabilityPair tviaarr[] =
-+{ Tpairs(TRAUMA_EYE), Tpairs(TRAUMA_LIMB), Tpairs(TRAUMA_BODY), Tpairs(TRAUMA_HEAD), Tpairs(TRAUMA_INTERNAL) };
-+
-+static const TraumaViabilityMap TraumasMap(tviaarr, tviaarr + sizeof(tviaarr) / sizeof(tviaarr[0]));
++const TraumaViabilityMap TraumasMap = { Tpairs(TRAUMA_EYE), Tpairs(TRAUMA_LIMB), Tpairs(TRAUMA_BODY), Tpairs(TRAUMA_HEAD), Tpairs(TRAUMA_INTERNAL) };
 +
 +//scripts
 +class traumas_config : public WorldScript
@@ -222,7 +208,7 @@ index 0000000..9fe4635
 +        TC_LOG_INFO("server.loading", ">> Traumas config %s.", reload ? "re-loaded" : "loaded");
 +
 +        if (_Tenabled)
-+            TC_LOG_INFO("server.loading", ">> Traumas system enabled (rev %u)", (uint32)TRAUMAS_REVISION);
++            TC_LOG_INFO("server.loading", ">> Traumas system enabled (rev %u)", TRAUMAS_REVISION);
 +    }
 +
 +    void _LoadConfig()
@@ -388,8 +374,8 @@ index 0000000..9fe4635
 +
 +        TraumaViabilityRange v_range = TraumasMap.equal_range(CreatureType(unit->GetCreatureType()));
 +        for (TraumaViabilityMap::const_iterator it = v_range.first; it != v_range.second; ++it)
-+            if (it->second.viable())
-+                vt_types.push_back(it->second.ttype());
++            if (it->second.viable)
++                vt_types.push_back(it->second.t_type);
 +
 +        if (!vt_types.empty())
 +            return vt_types.size() == 1 ? vt_types.front() : Trinity::Containers::SelectRandomContainerElement(vt_types);
@@ -404,7 +390,7 @@ index 0000000..9fe4635
 +    new script_traumas();
 +}
 diff --git a/src/server/worldserver/worldserver.conf.dist b/src/server/worldserver/worldserver.conf.dist
-index 6a51d91..b01168b 100644
+index 0a79664..e2fbc30 100644
 --- a/src/server/worldserver/worldserver.conf.dist
 +++ b/src/server/worldserver/worldserver.conf.dist
 @@ -4089,3 +4089,129 @@ Metric.OverallStatusInterval = 1
@@ -538,5 +524,5 @@ index 6a51d91..b01168b 100644
 +#
 +###################################################################################################
 -- 
-2.10.0.windows.1
+2.30.1.windows.1
 
