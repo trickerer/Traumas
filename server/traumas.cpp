@@ -123,16 +123,16 @@ public:
 
     void OnConfigLoad(bool reload) override
     {
-        _InitTraumasSystem(reload);
+        _initTraumasSystem(reload);
     }
 
 private:
-    static void _InitTraumasSystem(bool reload)
+    static void _initTraumasSystem(bool reload)
     {
         if (!reload)
             TC_LOG_INFO("server.loading", "Loading Traumas system...");
 
-        _LoadConfig();
+        _loadConfig();
 
         TC_LOG_INFO("server.loading", ">> Traumas config %s.", reload ? "re-loaded" : "loaded");
 
@@ -140,7 +140,7 @@ private:
             TC_LOG_INFO("server.loading", ">> Traumas system enabled (rev %u)", TRAUMAS_REVISION);
     }
 
-    static void _LoadConfig()
+    static void _loadConfig()
     {
         _traumasEnabled                = sConfigMgr->GetBoolDefault("Trauma.Enable", true);
 
@@ -273,7 +273,7 @@ public:
         if (!roll_chance_f(chance))
             return;
 
-        uint8 traumaType = _GetViableTraumaType(victim->GetCreatureType());
+        uint8 traumaType = _getViableTraumaType(victim->GetCreatureType());
         if (traumaType == TRAUMA_NONE)
         {
             //TC_LOG_ERROR("scripts", "No viable trauma type for cre type %u", victim->GetCreatureType());
@@ -297,12 +297,11 @@ public:
     }
 
 private:
-
     template<typename T = TraumaTypes, typename...Ts>
-    inline static constexpr std::enable_if_t<std::disjunction_v<std::is_same<T,Ts>...>, std::array<T, sizeof...(Ts)>>
-        make_arr(Ts... ts) noexcept { return { ts... }; }
+    inline static constexpr std::enable_if_t<std::conjunction_v<std::is_same<T,Ts>...>, std::array<T, sizeof...(Ts)>>
+        _makeArray(Ts... ts) noexcept { return { ts... }; }
 
-    static uint8 _GetViableTraumaType(uint32 creatureType)
+    static uint8 _getViableTraumaType(uint32 creatureType)
     {
         TraumaTypes ts[MAX_TRAUMAS]{};
         size_t count = 0;
@@ -313,15 +312,12 @@ private:
         switch (count)
         {
             case 1: return ts[0];
-            case 2: return Trinity::Containers::SelectRandomContainerElement(make_arr(ts[0], ts[1]));
-            case 3: return Trinity::Containers::SelectRandomContainerElement(make_arr(ts[0], ts[1], ts[2]));
-            case 4: return Trinity::Containers::SelectRandomContainerElement(make_arr(ts[0], ts[1], ts[2], ts[3]));
-            case 5: return Trinity::Containers::SelectRandomContainerElement(make_arr(ts[0], ts[1], ts[2], ts[3], ts[4]));
-            default:
-                break;
+            case 2: return Trinity::Containers::SelectRandomContainerElement(_makeArray(ts[0], ts[1]));
+            case 3: return Trinity::Containers::SelectRandomContainerElement(_makeArray(ts[0], ts[1], ts[2]));
+            case 4: return Trinity::Containers::SelectRandomContainerElement(_makeArray(ts[0], ts[1], ts[2], ts[3]));
+            case 5: return Trinity::Containers::SelectRandomContainerElement(_makeArray(ts[0], ts[1], ts[2], ts[3], ts[4]));
+            default:return uint8(TRAUMA_NONE);
         }
-
-        return uint8(TRAUMA_NONE);
     }
 };
 
