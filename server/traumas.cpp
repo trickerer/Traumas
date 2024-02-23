@@ -4,6 +4,7 @@
 
 #include "ScriptMgr.h"
 #include "Config.h"
+#include "Containers.h"
 #include "Log.h"
 #include "SpellAuraEffects.h"
 

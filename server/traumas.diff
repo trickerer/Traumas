@@ -1,21 +1,15 @@
-From be10315363d7f8fb01679b9f2feac4c7c67f6c73 Mon Sep 17 00:00:00 2001
-From: trickerer <onlysuffering@gmail.com>
-Date: Sat, 4 Sep 2021 20:32:33 +0700
-Subject: [PATCH] Traumas
-
----
- src/server/game/Entities/Unit/Unit.cpp        |   5 +
- src/server/game/Scripting/ScriptMgr.cpp       |   5 +
- src/server/game/Scripting/ScriptMgr.h         |   4 +
- .../scripts/Custom/custom_script_loader.cpp   |   2 +
- src/server/worldserver/worldserver.conf.dist  | 126 +++++++
- 6 files changed, 142 insertions(+)
+ src/server/game/Entities/Unit/Unit.cpp             |   5 +
+ src/server/game/Scripting/ScriptMgr.cpp            |   5 +
+ src/server/game/Scripting/ScriptMgr.h              |   4 +
+ src/server/scripts/Custom/custom_script_loader.cpp |   2 +
+ src/server/worldserver/worldserver.conf.dist       | 126 ++++++++
+ 5 files changed, 470 insertions(+)
 
 diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
-index bffe3258..0e003392 100644
+index 0f9250164..fb44a4146 100644
 --- a/src/server/game/Entities/Unit/Unit.cpp
 +++ b/src/server/game/Entities/Unit/Unit.cpp
-@@ -700,6 +700,11 @@ bool Unit::HasBreakableByDamageCrowdControlAura(Unit* excludeCasterChannel) cons
+@@ -720,6 +720,11 @@ bool Unit::HasBreakableByDamageCrowdControlAura(Unit* excludeCasterChannel) cons
      // Hook for OnDamage Event
      sScriptMgr->OnDamage(attacker, victim, damage);
  
@@ -28,10 +22,10 @@ index bffe3258..0e003392 100644
      if (attacker != victim && damagetype != DOT)
      {
 diff --git a/src/server/game/Scripting/ScriptMgr.cpp b/src/server/game/Scripting/ScriptMgr.cpp
-index 80197359..c1a3ceaa 100644
+index b35aa9760..c8d947536 100644
 --- a/src/server/game/Scripting/ScriptMgr.cpp
 +++ b/src/server/game/Scripting/ScriptMgr.cpp
-@@ -2108,6 +2108,11 @@ void ScriptMgr::OnDamage(Unit* attacker, Unit* victim, uint32& damage)
+@@ -2113,6 +2113,11 @@ void ScriptMgr::OnDamage(Unit* attacker, Unit* victim, uint32& damage)
      FOREACH_SCRIPT(UnitScript)->OnDamage(attacker, victim, damage);
  }
  
@@ -44,20 +38,20 @@ index 80197359..c1a3ceaa 100644
  {
      FOREACH_SCRIPT(UnitScript)->ModifyPeriodicDamageAurasTick(target, attacker, damage);
 diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
-index 3485c3aa..abf718e5 100644
+index e329fbaee..c6bfec669 100644
 --- a/src/server/game/Scripting/ScriptMgr.h
 +++ b/src/server/game/Scripting/ScriptMgr.h
-@@ -403,6 +403,9 @@ class TC_GAME_API UnitScript : public ScriptObject
+@@ -391,6 +391,9 @@ class TC_GAME_API UnitScript : public ScriptObject
          // Called when a unit deals damage to another unit
-         virtual void OnDamage(Unit* /*attacker*/, Unit* /*victim*/, uint32& /*damage*/) { }
+         virtual void OnDamage(Unit* attacker, Unit* victim, uint32& damage);
  
 +        // Called when a unit deals damage to another unit (more parameters)
 +        virtual void OnDamageEx(Unit* /*attacker*/, Unit* /*victim*/, uint32& /*damage*/, bool /*crit*/, bool /*direct*/, uint32 /*schoolMask*/) { }
 +
          // Called when DoT's Tick Damage is being Dealt
-         virtual void ModifyPeriodicDamageAurasTick(Unit* /*target*/, Unit* /*attacker*/, uint32& /*damage*/) { }
+         virtual void ModifyPeriodicDamageAurasTick(Unit* target, Unit* attacker, uint32& damage);
  
-@@ -1083,6 +1086,7 @@ class TC_GAME_API ScriptMgr
+@@ -1074,6 +1077,7 @@ class TC_GAME_API ScriptMgr
  
          void OnHeal(Unit* healer, Unit* reciever, uint32& gain);
          void OnDamage(Unit* attacker, Unit* victim, uint32& damage);
@@ -66,7 +60,7 @@ index 3485c3aa..abf718e5 100644
          void ModifyMeleeDamage(Unit* target, Unit* attacker, uint32& damage);
          void ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& damage);
 diff --git a/src/server/scripts/Custom/custom_script_loader.cpp b/src/server/scripts/Custom/custom_script_loader.cpp
-index 9e5e9ba2..3a2fbb44 100644
+index 9e5e9ba2b..3a2fbb440 100644
 --- a/src/server/scripts/Custom/custom_script_loader.cpp
 +++ b/src/server/scripts/Custom/custom_script_loader.cpp
 @@ -16,9 +16,11 @@
@@ -82,10 +76,10 @@ index 9e5e9ba2..3a2fbb44 100644
 +    AddSC_traumas();
  }
 diff --git a/src/server/worldserver/worldserver.conf.dist b/src/server/worldserver/worldserver.conf.dist
-index 022bca30..017b8a70 100644
+index 90ad17d31..fdf40b65b 100644
 --- a/src/server/worldserver/worldserver.conf.dist
 +++ b/src/server/worldserver/worldserver.conf.dist
-@@ -4117,3 +4117,129 @@ Metric.OverallStatusInterval = 1
+@@ -4147,3 +4147,129 @@ Metric.OverallStatusInterval = 1
  
  #
  ###################################################################################################
@@ -215,6 +209,3 @@ index 022bca30..017b8a70 100644
 +
 +#
 +###################################################################################################
--- 
-2.30.1.windows.1
-
